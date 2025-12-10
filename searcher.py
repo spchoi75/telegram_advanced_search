@@ -5,6 +5,7 @@ SQLite FTS5 trigram을 사용한 한국어 메시지 검색 도구
 """
 
 import argparse
+import json
 import os
 import re
 import sqlite3
@@ -58,6 +59,11 @@ def parse_args():
         "--db",
         type=str,
         help="Database path (overrides DB_PATH in .env)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results in JSON format",
     )
     return parser.parse_args()
 
@@ -205,7 +211,7 @@ def format_result(row: sqlite3.Row, keyword: str, index: int) -> str:
 
 
 def print_results(results: list, keyword: str, elapsed_time: float):
-    """Print all search results."""
+    """Print all search results in CLI format."""
     if not results:
         print(f"\nNo results found for '{keyword}'")
         return
@@ -219,6 +225,35 @@ def print_results(results: list, keyword: str, elapsed_time: float):
     print("=" * 60)
 
 
+def format_json_results(results: list, elapsed_ms: float) -> dict:
+    """Format search results as JSON-serializable dict."""
+    formatted_results = []
+
+    for row in results:
+        date = datetime.fromtimestamp(row["date"])
+        link = build_link(row["chat_id"], row["id"])
+
+        formatted_results.append({
+            "id": row["id"],
+            "chat_id": row["chat_id"],
+            "date": date.isoformat(),
+            "text": row["text"],
+            "link": link,
+        })
+
+    return {
+        "count": len(results),
+        "elapsed_ms": round(elapsed_ms, 2),
+        "results": formatted_results,
+    }
+
+
+def print_json_results(results: list, elapsed_ms: float):
+    """Print search results in JSON format."""
+    output = format_json_results(results, elapsed_ms)
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -229,8 +264,31 @@ def main():
     config = load_env()
     args = parse_args()
 
+    # Validate query length (minimum 3 characters for trigram)
+    if len(args.query) < 3:
+        if args.json:
+            print(json.dumps({
+                "error": "검색어는 최소 3글자 이상이어야 합니다",
+                "code": "QUERY_TOO_SHORT"
+            }, ensure_ascii=False))
+        else:
+            print("Error: 검색어는 최소 3글자 이상이어야 합니다", file=sys.stderr)
+        sys.exit(1)
+
     # Determine DB path
     db_path = args.db or config["db_path"]
+
+    # Check database exists (for JSON mode, return error instead of exit)
+    if not os.path.exists(db_path):
+        if args.json:
+            print(json.dumps({
+                "error": "인덱싱을 먼저 실행하세요",
+                "code": "DB_NOT_FOUND"
+            }, ensure_ascii=False))
+        else:
+            print(f"Error: Database not found: {db_path}", file=sys.stderr)
+            print("Run indexer.py first to create the database.", file=sys.stderr)
+        sys.exit(1)
 
     # Connect to database
     conn = connect_db(db_path)
@@ -242,9 +300,13 @@ def main():
         start_time = time.time()
         results = execute_search(conn, query, params)
         elapsed_time = time.time() - start_time
+        elapsed_ms = elapsed_time * 1000
 
-        # Print results
-        print_results(results, args.query, elapsed_time)
+        # Print results based on format
+        if args.json:
+            print_json_results(results, elapsed_ms)
+        else:
+            print_results(results, args.query, elapsed_time)
 
     finally:
         conn.close()

@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Skill(architecture-blueprint)",
+      "Skill(wbs-master)",
+      "Bash(pip install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python3:*)",
+      "Bash(sqlite3:*)",
+      "Skill(git-commit-writer)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: implement TeleSearch-KR telegram message search tool\n\nTelegram 한국어 검색 한계를 극복하기 위한 메시지 검색 도구 구현\n\nWhat:\n- indexer.py: Telethon TakeoutClient로 메시지 수집, SQLite 저장\n- searcher.py: FTS5 trigram 기반 한국어 부분 일치 검색 CLI\n- SQLite FTS5 + trigram 토크나이저로 0.001초 이내 검색\n\nWhy:\n- 텔레그램 기본 검색의 한국어 지원 부족 해결\n- 조사 분리 및 부분 문자열 검색 지원 필요\n\nFeatures:\n- 1,000개 배치 단위 저장 (I/O 최적화)\n- 증분 백업 지원 (마지막 Message ID 이후만 수집)\n- 검색어 하이라이트 및 원본 메시지 링크 제공\n- Rate Limit 회피 (TakeoutClient)\n\nLimitations:\n- 검색어 최소 3글자 (trigram 특성)\n\n🤖 Generated with [Claude Code](https://claude.ai/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(gh repo create:*)",
+      "Bash(xargs cat:*)",
+      "Bash(find:*)",
+      "Skill(prd-builder)",
+      "Bash(python -m pytest:*)",
+      "Skill(work-progress-summarizer)"
+    ]
+  }
+}

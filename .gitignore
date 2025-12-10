@@ -20,7 +20,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -29,6 +28,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.ruff_cache/
+.pytest_cache/
 
 # Virtual environments
 venv/
@@ -46,3 +47,13 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Tauri Desktop
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+
+# Vercel Web
+web/node_modules/
+web/.next/
+web/out/
