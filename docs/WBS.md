@@ -93,48 +93,70 @@
 ## Phase 4: Tauri Desktop 앱 [F-005]
 
 ### 4.1 Tauri 프로젝트 초기화
-- [ ] desktop/ 디렉터리 생성
-- [ ] Tauri 2.0 + React + TypeScript 프로젝트 생성
-- [ ] tauri.conf.json 설정 (앱 이름, 번들 ID 등)
-- [ ] Python 실행 경로 설정
+- [x] desktop/ 디렉터리 생성
+- [x] Tauri 2.0 + React + TypeScript 프로젝트 생성
+- [x] tauri.conf.json 설정 (앱 이름: TeleSearch-KR, 번들 ID: com.telesearch.kr)
+- [x] Python 실행 경로 설정 (subprocess로 프로젝트 루트 참조)
 
 ### 4.2 Rust Backend (src-tauri/)
-- [ ] commands/mod.rs: 커맨드 모듈 구조 생성
-- [ ] commands/chat_list.rs: get_chat_list 커맨드
+- [x] commands/mod.rs: 커맨드 모듈 구조 생성
+- [x] commands/chat_list.rs: get_chat_list 커맨드
   - Python chat_list.py subprocess 호출
   - JSON 파싱 및 반환
-- [ ] commands/indexing.rs: start_indexing, get_progress 커맨드
+- [x] commands/indexing.rs: start_indexing, is_indexing, run_sync 커맨드
   - Python indexer.py subprocess 호출
-  - 실시간 stdout 스트리밍
-- [ ] commands/search.rs: run_search 커맨드
+  - 실시간 stdout 스트리밍 (Tauri event emit)
+- [x] commands/search.rs: run_search 커맨드
   - Python searcher.py --json subprocess 호출
   - 결과 JSON 반환
+- [ ] commands/indexing.rs 확장 (진행률/취소)
+  - IndexingProgress 구조체에 percentage, eta_sec 추가
+  - cancel_indexing 커맨드 추가
+  - rollback_indexing 커맨드 추가
+- [ ] run_sync 비동기 스트리밍으로 변경
+  - sync-progress 이벤트 emit
+  - cancel_sync 커맨드 추가
+  - rollback_sync 커맨드 추가
 
 ### 4.3 React Frontend (src/)
-- [ ] hooks/useTauriCommand.ts: IPC 래퍼 훅
-- [ ] hooks/useSearch.ts: 검색 상태 관리 훅
-- [ ] components/ChatSelector.tsx: 채팅방 드롭다운
+- [x] hooks/useTauriCommand.ts: IPC 래퍼 훅
+- [x] hooks/useSearch.ts: 검색 상태 관리 훅
+- [x] components/ChatSelector.tsx: 채팅방 드롭다운
   - get_chat_list 연동
   - 타입(개인/그룹/채널) 표시
-- [ ] components/IndexingPanel.tsx: 인덱싱 UI
+- [x] components/IndexingPanel.tsx: 인덱싱 UI
   - 인덱싱 시작 버튼
   - 진행률 바 (실시간 업데이트)
-- [ ] components/SearchBar.tsx: 검색 입력
+- [x] components/SearchBar.tsx: 검색 입력
   - Cmd+K 단축키 지원
   - 최소 3글자 검증
-- [ ] components/SearchOptions.tsx: 검색 옵션
-  - 결과 수 선택 (10/20/50)
-  - 기간 필터 (선택사항)
-- [ ] components/ResultList.tsx: 검색 결과
+- [x] components/SearchOptions.tsx: 검색 옵션
+  - 결과 수 선택 (10/20/50/100)
+- [x] components/ResultList.tsx: 검색 결과
   - 결과 목록 렌더링
-  - 클릭 시 t.me 링크 열기 (shell.open)
-- [ ] App.tsx: 메인 레이아웃 조합
+  - 클릭 시 t.me 링크 열기 (openUrl)
+- [x] App.tsx: 메인 레이아웃 조합
+- [x] App.css: 다크 테마 스타일링
+- [ ] components/ProgressBar.tsx: 공통 진행률 바 컴포넌트
+  - 백분율 표시
+  - 예상 남은 시간 표시
+  - 상태 메시지 표시
+- [ ] components/IndexingPanel.tsx 개선
+  - 진행률 바 연동
+  - 취소 버튼 추가
+  - 취소 확인 다이얼로그
+- [ ] 동기화 진행률 UI 추가
+  - 동기화 진행률 바
+  - 취소/롤백 버튼
 
 ### 4.4 Desktop 통합 테스트
 - [ ] 채팅방 목록 조회 → UI 표시 테스트
 - [ ] 인덱싱 실행 → 진행률 표시 테스트
 - [ ] 검색 실행 → 결과 표시 테스트
 - [ ] 결과 클릭 → 브라우저 링크 열기 테스트
+- [ ] 인덱싱 취소 → Takeout 세션 종료 → 부분 데이터 롤백 테스트
+- [ ] 동기화 취소 → 부분 데이터 롤백 테스트
+- [ ] 진행률 표시 정확도 테스트
 
 ---
 

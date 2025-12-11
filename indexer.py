@@ -6,12 +6,49 @@ TeleSearch-KR: Telegram Message Indexer
 
 import argparse
 import asyncio
+import json
 import os
+import signal
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
+
+# ============================================================
+# Global State for Cancellation
+# ============================================================
+
+_cancelled = False
+_takeout_client = None
+_current_session_messages = []  # 현재 세션에서 추가된 메시지 ID들
+_start_time = None
+
+
+def handle_signal(signum, frame):
+    """Handle SIGINT/SIGTERM for graceful cancellation."""
+    global _cancelled
+    _cancelled = True
+    print_progress({"type": "cancelling", "message": "취소 요청 수신..."}, json_mode=True)
+
+
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
+
+
+def print_progress(data: dict, json_mode: bool = False):
+    """Print progress in JSON or text format."""
+    if json_mode:
+        print(json.dumps(data, ensure_ascii=False), flush=True)
+    else:
+        if data.get("type") == "progress":
+            msg = data.get("message", "")
+            print(f"  {msg}", end="\r")
+        else:
+            print(data.get("message", ""))
+
+
 from telethon import TelegramClient
 from telethon.errors import (
     ChatAdminRequiredError,
@@ -68,6 +105,11 @@ def parse_args():
         "--db",
         type=str,
         help="Database path (overrides DB_PATH in .env)",
+    )
+    parser.add_argument(
+        "--json-progress",
+        action="store_true",
+        help="Output progress in JSON format for GUI integration",
     )
     return parser.parse_args()
 
@@ -132,6 +174,7 @@ def get_last_message_id(conn: sqlite3.Connection, chat_id: int) -> int:
 
 def batch_insert(conn: sqlite3.Connection, messages: list):
     """Insert messages in batch using executemany."""
+    global _current_session_messages
     if not messages:
         return
 
@@ -144,6 +187,27 @@ def batch_insert(conn: sqlite3.Connection, messages: list):
         messages
     )
     conn.commit()
+
+    # Track inserted message IDs for potential rollback
+    _current_session_messages.extend([m[0] for m in messages])
+
+
+def rollback_session(conn: sqlite3.Connection, chat_id: int):
+    """Rollback messages inserted during this session."""
+    global _current_session_messages
+    if not _current_session_messages:
+        return 0
+
+    cursor = conn.cursor()
+    placeholders = ",".join("?" * len(_current_session_messages))
+    cursor.execute(
+        f"DELETE FROM messages WHERE id IN ({placeholders}) AND chat_id = ?",
+        _current_session_messages + [chat_id]
+    )
+    deleted = cursor.rowcount
+    conn.commit()
+    _current_session_messages = []
+    return deleted
 
 
 # ============================================================
@@ -168,12 +232,16 @@ async def fetch_messages(
     chat_id: int,
     min_id: int,
     offset_date: datetime,
-    batch_size: int = 1000
+    batch_size: int = 1000,
+    json_mode: bool = False
 ):
     """
     Fetch messages from Telegram using TakeoutClient.
     Yields batches of messages for efficient processing.
     """
+    global _cancelled, _takeout_client, _start_time
+    _start_time = time.time()
+
     try:
         async with client.takeout(
             contacts=False,
@@ -183,6 +251,7 @@ async def fetch_messages(
             channels=True,
             files=False,
         ) as takeout:
+            _takeout_client = takeout
             batch = []
             count = 0
 
@@ -192,6 +261,15 @@ async def fetch_messages(
                 offset_date=offset_date,
                 reverse=False,
             ):
+                # Check for cancellation
+                if _cancelled:
+                    print_progress({
+                        "type": "cancelled",
+                        "message": "인덱싱이 취소되었습니다.",
+                        "collected": count
+                    }, json_mode)
+                    return
+
                 # Skip non-text messages
                 if not isinstance(message, Message) or not message.text:
                     continue
@@ -207,25 +285,58 @@ async def fetch_messages(
 
                 if len(batch) >= batch_size:
                     yield batch
-                    print(f"  Collected {count} messages...", end="\r")
+                    elapsed = time.time() - _start_time
+                    # ETA 계산 (총 개수를 모르므로 수집 속도 기반)
+                    rate = count / elapsed if elapsed > 0 else 0
+                    print_progress({
+                        "type": "progress",
+                        "phase": "fetching",
+                        "current": count,
+                        "total": None,  # 총 개수는 알 수 없음
+                        "message": f"Collected {count} messages...",
+                        "elapsed_sec": int(elapsed),
+                        "rate": round(rate, 1)  # 초당 메시지 수
+                    }, json_mode)
                     batch = []
 
             # Yield remaining messages
             if batch:
                 yield batch
-                print(f"  Collected {count} messages...", end="\r")
+                elapsed = time.time() - _start_time
+                print_progress({
+                    "type": "progress",
+                    "phase": "fetching",
+                    "current": count,
+                    "total": None,
+                    "message": f"Collected {count} messages...",
+                    "elapsed_sec": int(elapsed)
+                }, json_mode)
 
-            print(f"\n  Total: {count} messages")
+            print_progress({
+                "type": "complete",
+                "message": f"Total: {count} messages",
+                "total": count,
+                "elapsed_sec": int(time.time() - _start_time)
+            }, json_mode)
 
     except TakeoutInitDelayError as e:
         wait_time = e.seconds
-        print(f"\nTelegram requires waiting {wait_time} seconds before takeout.")
-        print("This is a security measure. Please try again later.")
-        print(f"Estimated wait time: {timedelta(seconds=wait_time)}")
+        print_progress({
+            "type": "error",
+            "code": "TAKEOUT_DELAY",
+            "message": f"Telegram requires waiting {wait_time} seconds before takeout.",
+            "wait_seconds": wait_time
+        }, json_mode)
         raise
     except ChatAdminRequiredError:
-        print(f"\nError: Admin permission required for chat {chat_id}")
+        print_progress({
+            "type": "error",
+            "code": "ADMIN_REQUIRED",
+            "message": f"Admin permission required for chat {chat_id}"
+        }, json_mode)
         raise
+    finally:
+        _takeout_client = None
 
 
 # ============================================================
@@ -234,15 +345,21 @@ async def fetch_messages(
 
 async def main():
     """Main entry point."""
+    global _cancelled, _current_session_messages
+
     # Load configuration
     config = load_env()
     args = parse_args()
+    json_mode = args.json_progress
 
     # Determine chat ID
     chat_id = args.chat_id or config["default_chat_id"]
     if not chat_id:
-        print("Error: No chat ID specified.")
-        print("Use --chat-id argument or set DEFAULT_CHAT_ID in .env")
+        print_progress({
+            "type": "error",
+            "code": "NO_CHAT_ID",
+            "message": "No chat ID specified. Use --chat-id argument or set DEFAULT_CHAT_ID in .env"
+        }, json_mode)
         sys.exit(1)
 
     # Determine DB path
@@ -251,45 +368,94 @@ async def main():
     # Calculate offset date
     offset_date = datetime.now() - timedelta(days=365 * args.years)
 
-    print(f"TeleSearch-KR Indexer")
-    print(f"=" * 40)
-    print(f"Chat ID: {chat_id}")
-    print(f"Database: {db_path}")
-    print(f"Period: Last {args.years} year(s)")
-    print(f"=" * 40)
+    # Print start info
+    print_progress({
+        "type": "start",
+        "chat_id": chat_id,
+        "db_path": db_path,
+        "years": args.years,
+        "message": f"TeleSearch-KR Indexer - Chat {chat_id}"
+    }, json_mode)
+
+    if not json_mode:
+        print(f"TeleSearch-KR Indexer")
+        print(f"=" * 40)
+        print(f"Chat ID: {chat_id}")
+        print(f"Database: {db_path}")
+        print(f"Period: Last {args.years} year(s)")
+        print(f"=" * 40)
 
     # Initialize database
     conn = init_db(db_path)
+    _current_session_messages = []  # Reset session tracking
 
     # Get last message ID for incremental backup
     min_id = get_last_message_id(conn, chat_id)
     if min_id > 0:
-        print(f"Incremental mode: Starting from message ID {min_id}")
+        print_progress({
+            "type": "info",
+            "message": f"Incremental mode: Starting from message ID {min_id}"
+        }, json_mode)
     else:
-        print("Full sync mode: Fetching all messages")
+        print_progress({
+            "type": "info",
+            "message": "Full sync mode: Fetching all messages"
+        }, json_mode)
 
     # Create Telegram client
-    print("\nConnecting to Telegram...")
+    print_progress({"type": "info", "message": "Connecting to Telegram..."}, json_mode)
     client = await create_client(config)
 
     try:
         # Fetch and store messages
-        print(f"\nFetching messages from chat {chat_id}...")
+        print_progress({
+            "type": "info",
+            "message": f"Fetching messages from chat {chat_id}..."
+        }, json_mode)
         total = 0
 
-        async for batch in fetch_messages(client, chat_id, min_id, offset_date):
+        async for batch in fetch_messages(client, chat_id, min_id, offset_date, json_mode=json_mode):
+            if _cancelled:
+                break
             batch_insert(conn, batch)
             total += len(batch)
 
-        print(f"\nIndexing complete!")
-        print(f"Total messages indexed: {total}")
+        # Handle cancellation with rollback
+        if _cancelled:
+            print_progress({
+                "type": "rolling_back",
+                "message": "롤백 중...",
+                "messages_to_delete": len(_current_session_messages)
+            }, json_mode)
+            deleted = rollback_session(conn, chat_id)
+            print_progress({
+                "type": "cancelled",
+                "message": f"인덱싱이 취소되었습니다. {deleted}개 메시지 롤백됨.",
+                "rolled_back": deleted
+            }, json_mode)
+            sys.exit(130)  # Standard exit code for SIGINT
+
+        print_progress({
+            "type": "complete",
+            "message": f"Indexing complete! Total: {total} messages",
+            "total": total
+        }, json_mode)
 
     except (TakeoutInitDelayError, ChatAdminRequiredError):
+        # Rollback on error
+        if _current_session_messages:
+            rollback_session(conn, chat_id)
         sys.exit(1)
     except FloodWaitError as e:
-        print(f"\nRate limited. Waiting {e.seconds} seconds...")
-        await asyncio.sleep(e.seconds)
-        print("Please run the script again.")
+        print_progress({
+            "type": "error",
+            "code": "FLOOD_WAIT",
+            "message": f"Rate limited. Waiting {e.seconds} seconds...",
+            "wait_seconds": e.seconds
+        }, json_mode)
+        # Rollback on error
+        if _current_session_messages:
+            rollback_session(conn, chat_id)
         sys.exit(1)
     finally:
         conn.close()

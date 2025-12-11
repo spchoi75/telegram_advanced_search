@@ -172,8 +172,8 @@ def highlight_text(text: str, keyword: str, max_length: int = 200) -> str:
 
 def build_link(chat_id: int, message_id: int) -> str:
     """
-    Build Telegram message link.
-    Format: https://t.me/c/{chat_id}/{message_id}
+    Build Telegram message link using tg:// protocol to open in app.
+    Format: tg://privatepost?channel={channel_id}&post={message_id}
 
     Note: For private chats/groups, chat_id needs conversion:
     - Channels/Supergroups have IDs like -100XXXXXXXXXX
@@ -187,7 +187,8 @@ def build_link(chat_id: int, message_id: int) -> str:
     else:
         link_chat_id = str(chat_id)
 
-    return f"https://t.me/c/{link_chat_id}/{message_id}"
+    # Use tg:// protocol to open in Telegram app instead of web
+    return f"tg://privatepost?channel={link_chat_id}&post={message_id}"
 
 
 def format_result(row: sqlite3.Row, keyword: str, index: int) -> str:

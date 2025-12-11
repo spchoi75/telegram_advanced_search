@@ -93,6 +93,13 @@ Vercel Web ──(HTTP)──► Supabase API ◄──────── Supaba
 2. Vercel → Supabase: pg_trgm 검색 쿼리
 3. 결과 → UI 표시
 
+**취소 흐름 (인덱싱/동기화)**:
+1. 사용자 → Tauri UI: 취소 버튼 클릭
+2. Tauri → Rust: IPC 호출 (cancel_indexing 또는 cancel_sync)
+3. Rust: subprocess SIGTERM 전송
+4. Python: 시그널 핸들러 → Takeout 세션 종료 / 롤백 수행
+5. Rust → UI: "cancelled" 상태 이벤트 emit
+
 ---
 
 ## 3. 상세 구조 (컴포넌트 뷰)
@@ -104,7 +111,8 @@ desktop/
 ├── src/                        # React Frontend
 │   ├── components/
 │   │   ├── ChatSelector.tsx    # 채팅방 드롭다운
-│   │   ├── IndexingPanel.tsx   # 인덱싱 버튼 + 진행률
+│   │   ├── IndexingPanel.tsx   # 인덱싱 버튼 + 진행률 + 취소
+│   │   ├── ProgressBar.tsx     # 공통 진행률 바 (백분율, ETA)
 │   │   ├── SearchBar.tsx       # 검색 입력
 │   │   ├── SearchOptions.tsx   # 결과 수, 기간 옵션
 │   │   └── ResultList.tsx      # 검색 결과 목록
